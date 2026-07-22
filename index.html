@@ -695,6 +695,7 @@
 
 <script type="module">
 import * as THREE from 'three';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
@@ -1043,6 +1044,7 @@ const ROOF_COLORS = [0x8a4b3b, 0x6b4a5a, 0x54606b, 0x7a6a4a];
 
 // ---------- enterable houses ----------
 const houses = []; // {x, z, w, d, roof} — roof hides when the player steps inside
+const towers = []; // {x, z, mesh, visible} — downtown/mid-rise buildings, distance-culled the same way houses are
 const houseLampMats = []; // emissive interior lamps — brighter at night
 const doors = []; // {x, z, w, d, h, pivot, open} — h toggles between blocking/open in place (no grid rebuild needed)
 const DOOR_MAT = new THREE.MeshStandardMaterial({ color: 0x4a3324, roughness: 0.6, metalness: 0.1 });
@@ -1234,6 +1236,13 @@ let insideHouse = null;
 function updateHouses() {
   houseUpdateCounter++;
   const cullDist = (settings.draw || 320) * 0.85; // beyond this fog already hides it — stop rendering it too
+  // tall downtown towers stay part of the skyline silhouette from much farther away than a house
+  // ever needs to be visible from, so their cull radius grows with building height
+  for (const tw of towers) {
+    const d = dist2(tw.x, tw.z, player.x, player.z);
+    const shouldShow = d < cullDist + tw.h * 4;
+    if (shouldShow !== tw.visible) { tw.visible = shouldShow; tw.mesh.visible = shouldShow; }
+  }
   insideHouse = null;
   for (const h of houses) {
     const d = dist2(h.x + h.w / 2, h.z + h.d / 2, player.x, player.z);
@@ -2202,14 +2211,11 @@ function buildCity() {
   const treeTopG = new THREE.ConeGeometry(1.5, 3.2, 7);
   const trunkM = new THREE.MeshStandardMaterial({ color: 0x6d4c33 });
   const topM = new THREE.MeshStandardMaterial({ color: 0x2e7d43 });
-
-  function addTree(x, z) {
-    const t = new THREE.Group();
-    const tr = new THREE.Mesh(treeTrunkG, trunkM); tr.position.y = 1.3; tr.castShadow = true;
-    const tp = new THREE.Mesh(treeTopG, topM); tp.position.y = 3.8; tp.castShadow = true;
-    t.add(tr, tp); t.position.set(x, 0, z);
-    scene.add(t);
-  }
+  // trees are purely decorative and never move — collect every placement and render the whole
+  // forest as two InstancedMeshes (trunks, tops) instead of a separate Group+2 Mesh per tree.
+  // With hundreds of trees scattered across a bigger map this turns hundreds of draw calls into 2.
+  const treePositions = [];
+  function addTree(x, z) { treePositions.push(x, z); }
 
   for (const b of blockInfo) {
     const { x0, z0, size, type } = b;
@@ -2251,6 +2257,7 @@ function buildCity() {
       m.position.set(px + bw / 2, h / 2, pz + bd / 2);
       m.castShadow = m.receiveShadow = true;
       scene.add(m);
+      towers.push({ x: px + bw / 2, z: pz + bd / 2, h, mesh: m, visible: true });
       solids.push({ x: px, z: pz, w: bw, d: bd, h });
     }
   }
@@ -2260,7 +2267,53 @@ function buildCity() {
     addTree(t, -3); addTree(t, CITY + 3);
     if (i % 2) { addTree(-3, t); addTree(CITY + 3, t); }
   }
+  const treeCount = treePositions.length / 2;
+  const trunkInst = new THREE.InstancedMesh(treeTrunkG, trunkM, treeCount);
+  const topInst = new THREE.InstancedMesh(treeTopG, topM, treeCount);
+  trunkInst.castShadow = topInst.castShadow = true;
+  const dummy = new THREE.Object3D();
+  for (let i = 0; i < treeCount; i++) {
+    const x = treePositions[i * 2], z = treePositions[i * 2 + 1];
+    dummy.position.set(x, 1.3, z); dummy.updateMatrix(); trunkInst.setMatrixAt(i, dummy.matrix);
+    dummy.position.set(x, 3.8, z); dummy.updateMatrix(); topInst.setMatrixAt(i, dummy.matrix);
+  }
+  scene.add(trunkInst, topInst);
   buildSolidGrid();
+}
+
+// ================= player model (detailed rigged character) =================
+// Only the player gets the full skinned/animated model — with 200+ NPCs on screen the cheap
+// procedural capsule figure below is what keeps that affordable, so NPCs stay on it.
+// Model: "Vanguard", one of the sample rigged characters shipped in the three.js repo
+// (examples/models/gltf/Soldier.glb, Mixamo-sourced — free to use, standard three.js demo asset).
+// Its built-in scale already puts it at ~1.83m tall, matching the old capsule player's height,
+// so it drops in with no extra rescaling.
+function fadeToPlayerAction(action, duration = 0.25) {
+  if (!action || action === player.activeAction) return;
+  const prev = player.activeAction;
+  player.activeAction = action;
+  if (prev) prev.fadeOut(duration);
+  action.reset().setEffectiveWeight(1).fadeIn(duration).play();
+}
+function loadPlayerModel() {
+  new GLTFLoader().load('./assets/player.glb', (gltf) => {
+    const model = gltf.scene;
+    model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    model.position.set(player.x, player.y, player.z);
+    model.rotation.y = player.mesh.rotation.y;
+    scene.remove(player.mesh);
+    player.mesh = model;
+    scene.add(model);
+    player.mixer = new THREE.AnimationMixer(model);
+    const clip = name => gltf.animations.find(c => c.name === name);
+    player.actions = {
+      idle: player.mixer.clipAction(clip('Idle')),
+      walk: player.mixer.clipAction(clip('Walk')),
+      run: player.mixer.clipAction(clip('Run'))
+    };
+    player.activeAction = null;
+    fadeToPlayerAction(player.actions.idle, 0);
+  }, undefined, (err) => console.error('player model failed to load, keeping capsule figure', err));
 }
 
 // ================= characters =================
@@ -2836,7 +2889,10 @@ function updateNpcs(dt) {
         // which reads as two people stopping to chat rather than a scripted idle animation
         n.state = 'idle'; n.timer = rand(2.5, 5.5);
         let nearest = null, nd = 3;
-        for (const o of npcs) {
+        // this O(n) scan is only worth its cost for pedestrians close enough for the player to
+        // ever notice — with a few hundred ambient NPCs on a big map, skipping it for the vast
+        // majority that are off in some other district saves a lot of CPU for zero visible loss
+        if (pd < 60) for (const o of npcs) {
           if (o === n || o.dead || o.state === 'flee' || o.state === 'attack') continue;
           const d = dist2(n.x, n.z, o.x, o.z);
           if (d < nd) { nd = d; nearest = o; }
@@ -3879,7 +3935,7 @@ const player = {
   missionsDone: 0, dead: false, deadT: 0,
   home: { garageCap: 2, mattress: false, fridge: false, safe: false, paintTier: 0, poolLights: false, gym: false, garden: false, property2: false },
   fridgeT: 0, ticket: null,
-  mesh: null
+  mesh: null, mixer: null, actions: null, activeAction: null
 };
 let camYaw = 0.6, camPitch = 0.24;
 const keys = {};
@@ -5013,9 +5069,12 @@ function updatePlayer(dt) {
       // seat the player on the bike, hands on the bars
       player.mesh.position.set(player.car.x, 0.42, player.car.z);
       player.mesh.rotation.y = -player.car.angle;
-      const u = player.mesh.userData;
-      u.armL.rotation.z = 0.95; u.armR.rotation.z = 0.95;
-      u.legL.rotation.z = 0.55; u.legR.rotation.z = -0.55;
+      if (player.mixer) { player.mixer.update(dt); fadeToPlayerAction(player.actions.idle); }
+      else {
+        const u = player.mesh.userData;
+        u.armL.rotation.z = 0.95; u.armR.rotation.z = 0.95;
+        u.legL.rotation.z = 0.55; u.legR.rotation.z = -0.55;
+      }
     }
     // camera follows the car heading
     const target = player.car.speed >= -1 ? player.car.angle : player.car.angle + Math.PI;
@@ -5059,13 +5118,23 @@ function updatePlayer(dt) {
       }
     }
   }
-  const u = player.mesh.userData;
-  u.gun.visible = player.hasPistol && player.weapon === 'pistol';
-  u.aiming = u.gun.visible;
-  if (u.aiming) { player.yaw = camYaw; u.armR.rotation.z = Math.PI / 2; }
+  const aiming = player.hasPistol && player.weapon === 'pistol';
+  if (aiming) player.yaw = camYaw;
   player.mesh.position.set(player.x, player.y, player.z);
   player.mesh.rotation.y = -player.yaw;
-  animWalk(player.mesh, player.walkT, ml > 0.01 ? 0.6 : 0.08, dt);
+  if (player.mixer) {
+    // detailed model: crossfade between its baked Idle/Walk/Run clips instead of the
+    // procedural per-limb rig animation (that rig only exists on the capsule NPC figures)
+    player.mixer.update(dt);
+    const sprinting = keys['ShiftLeft'] || keys['ShiftRight'];
+    fadeToPlayerAction(ml > 0.01 ? (sprinting ? player.actions.run : player.actions.walk) : player.actions.idle);
+  } else {
+    const u = player.mesh.userData;
+    u.gun.visible = aiming;
+    u.aiming = aiming;
+    if (aiming) u.armR.rotation.z = Math.PI / 2;
+    animWalk(player.mesh, player.walkT, ml > 0.01 ? 0.6 : 0.08, dt);
+  }
 }
 
 function updateCamera(dt) {
@@ -5311,8 +5380,10 @@ function boot() {
   homeMarker = makeMarker(0xff3d81, 2); homeMarker.position.set(HOME_DOOR.x, 0.7, HOME_DOOR.z);
   spawnPickups();
   // traffic (roughly 1 in 4 is a motorcycle) — distance culling makes a denser city affordable
-  // counts scaled up ~1.5x to match the bigger (600m vs 480m) map so streets don't feel emptier
-  for (let i = 0; i < 145; i++) {
+  // counts scaled up modestly to match the bigger (600m vs 480m) map so streets don't feel emptier,
+  // kept well under a full 1.5x multiplier since ambient car/NPC AI updates cost CPU every frame
+  // regardless of whether they're currently rendered
+  for (let i = 0; i < 115; i++) {
     const horiz = Math.random() < 0.5;
     const lane = drivingLanes[randi(0, drivingLanes.length - 1)];
     const pos = rand(40, CITY - 40);
@@ -5322,7 +5393,7 @@ function boot() {
   }
   // ambient police patrols — always present, even at zero stars, so crimes actually have
   // someone around to witness them (see the note in aiDrive)
-  for (let i = 0; i < 13; i++) {
+  for (let i = 0; i < 10; i++) {
     const horiz = Math.random() < 0.5;
     const lane = drivingLanes[randi(0, drivingLanes.length - 1)];
     const pos = rand(40, CITY - 40);
@@ -5331,19 +5402,21 @@ function boot() {
     else makeCar(lane + (Math.random() < 0.5 ? -3 : 3), pos, Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2, opts);
   }
   // parked vehicles along the streets
-  for (let i = 0; i < 66; i++) {
+  for (let i = 0; i < 54; i++) {
     const lane = drivingLanes[randi(0, drivingLanes.length - 1)];
     const pos = rand(30, CITY - 30);
     const opts = { driver: 'none', bike: Math.random() < 0.3 };
     if (Math.random() < 0.5) makeCar(pos, lane - ROADW / 2 + 1.4, 0, opts);
     else makeCar(lane - ROADW / 2 + 1.4, pos, Math.PI / 2, opts);
   }
-  for (let i = 0; i < 280; i++) spawnNpc();
-  for (let g = 0; g < 4; g++) for (let i = 0; i < 6; i++) spawnGangMember(g);
-  // player
+  for (let i = 0; i < 230; i++) spawnNpc();
+  for (let g = 0; g < 4; g++) for (let i = 0; i < 5; i++) spawnGangMember(g);
+  // player — start with the cheap capsule figure immediately so boot never blocks on a network
+  // fetch, then swap in the detailed rigged model once it's done downloading (~2MB)
   player.mesh = makeHuman({ shirt: 0xff3d81, pants: 0x2a2a3a, hair: 0x191919 });
   player.mesh.position.set(player.x, 0, player.z);
   scene.add(player.mesh);
+  loadPlayerModel();
   applySettings();
   syncSettingsUI();
   // debug/test handle
