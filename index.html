@@ -695,6 +695,7 @@
 
 <script type="module">
 import * as THREE from 'three';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
@@ -2278,6 +2279,41 @@ function buildCity() {
   }
   scene.add(trunkInst, topInst);
   buildSolidGrid();
+}
+
+// ================= player model (detailed rigged character) =================
+// Only the player gets the full skinned/animated model — with 200+ NPCs on screen the cheap
+// procedural capsule figure below is what keeps that affordable, so NPCs stay on it.
+// Model: "Vanguard", one of the sample rigged characters shipped in the three.js repo
+// (examples/models/gltf/Soldier.glb, Mixamo-sourced — free to use, standard three.js demo asset).
+// Its built-in scale already puts it at ~1.83m tall, matching the old capsule player's height,
+// so it drops in with no extra rescaling.
+function fadeToPlayerAction(action, duration = 0.25) {
+  if (!action || action === player.activeAction) return;
+  const prev = player.activeAction;
+  player.activeAction = action;
+  if (prev) prev.fadeOut(duration);
+  action.reset().setEffectiveWeight(1).fadeIn(duration).play();
+}
+function loadPlayerModel() {
+  new GLTFLoader().load('./assets/player.glb', (gltf) => {
+    const model = gltf.scene;
+    model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    model.position.set(player.x, player.y, player.z);
+    model.rotation.y = player.mesh.rotation.y;
+    scene.remove(player.mesh);
+    player.mesh = model;
+    scene.add(model);
+    player.mixer = new THREE.AnimationMixer(model);
+    const clip = name => gltf.animations.find(c => c.name === name);
+    player.actions = {
+      idle: player.mixer.clipAction(clip('Idle')),
+      walk: player.mixer.clipAction(clip('Walk')),
+      run: player.mixer.clipAction(clip('Run'))
+    };
+    player.activeAction = null;
+    fadeToPlayerAction(player.actions.idle, 0);
+  }, undefined, (err) => console.error('player model failed to load, keeping capsule figure', err));
 }
 
 // ================= characters =================
@@ -3899,7 +3935,7 @@ const player = {
   missionsDone: 0, dead: false, deadT: 0,
   home: { garageCap: 2, mattress: false, fridge: false, safe: false, paintTier: 0, poolLights: false, gym: false, garden: false, property2: false },
   fridgeT: 0, ticket: null,
-  mesh: null
+  mesh: null, mixer: null, actions: null, activeAction: null
 };
 let camYaw = 0.6, camPitch = 0.24;
 const keys = {};
@@ -5033,9 +5069,12 @@ function updatePlayer(dt) {
       // seat the player on the bike, hands on the bars
       player.mesh.position.set(player.car.x, 0.42, player.car.z);
       player.mesh.rotation.y = -player.car.angle;
-      const u = player.mesh.userData;
-      u.armL.rotation.z = 0.95; u.armR.rotation.z = 0.95;
-      u.legL.rotation.z = 0.55; u.legR.rotation.z = -0.55;
+      if (player.mixer) { player.mixer.update(dt); fadeToPlayerAction(player.actions.idle); }
+      else {
+        const u = player.mesh.userData;
+        u.armL.rotation.z = 0.95; u.armR.rotation.z = 0.95;
+        u.legL.rotation.z = 0.55; u.legR.rotation.z = -0.55;
+      }
     }
     // camera follows the car heading
     const target = player.car.speed >= -1 ? player.car.angle : player.car.angle + Math.PI;
@@ -5079,13 +5118,23 @@ function updatePlayer(dt) {
       }
     }
   }
-  const u = player.mesh.userData;
-  u.gun.visible = player.hasPistol && player.weapon === 'pistol';
-  u.aiming = u.gun.visible;
-  if (u.aiming) { player.yaw = camYaw; u.armR.rotation.z = Math.PI / 2; }
+  const aiming = player.hasPistol && player.weapon === 'pistol';
+  if (aiming) player.yaw = camYaw;
   player.mesh.position.set(player.x, player.y, player.z);
   player.mesh.rotation.y = -player.yaw;
-  animWalk(player.mesh, player.walkT, ml > 0.01 ? 0.6 : 0.08, dt);
+  if (player.mixer) {
+    // detailed model: crossfade between its baked Idle/Walk/Run clips instead of the
+    // procedural per-limb rig animation (that rig only exists on the capsule NPC figures)
+    player.mixer.update(dt);
+    const sprinting = keys['ShiftLeft'] || keys['ShiftRight'];
+    fadeToPlayerAction(ml > 0.01 ? (sprinting ? player.actions.run : player.actions.walk) : player.actions.idle);
+  } else {
+    const u = player.mesh.userData;
+    u.gun.visible = aiming;
+    u.aiming = aiming;
+    if (aiming) u.armR.rotation.z = Math.PI / 2;
+    animWalk(player.mesh, player.walkT, ml > 0.01 ? 0.6 : 0.08, dt);
+  }
 }
 
 function updateCamera(dt) {
@@ -5362,10 +5411,12 @@ function boot() {
   }
   for (let i = 0; i < 230; i++) spawnNpc();
   for (let g = 0; g < 4; g++) for (let i = 0; i < 5; i++) spawnGangMember(g);
-  // player
+  // player — start with the cheap capsule figure immediately so boot never blocks on a network
+  // fetch, then swap in the detailed rigged model once it's done downloading (~2MB)
   player.mesh = makeHuman({ shirt: 0xff3d81, pants: 0x2a2a3a, hair: 0x191919 });
   player.mesh.position.set(player.x, 0, player.z);
   scene.add(player.mesh);
+  loadPlayerModel();
   applySettings();
   syncSettingsUI();
   // debug/test handle
