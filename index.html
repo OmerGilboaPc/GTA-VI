@@ -2295,12 +2295,19 @@ function fadeToPlayerAction(action, duration = 0.25) {
   if (prev) prev.fadeOut(duration);
   action.reset().setEffectiveWeight(1).fadeIn(duration).play();
 }
+// the capsule figure's "forward" is local +X (see makeHuman's nose comment), which is what the
+// game's -yaw rotation formula assumes; this rig's rest-pose forward is a different local axis,
+// so it needs an extra fixed yaw correction on top of the same formula to actually face the way
+// it's walking instead of walking sideways
+const PLAYER_MODEL_YAW_OFFSET = -Math.PI / 2;
+function setPlayerFacing(yaw) {
+  player.mesh.rotation.y = -yaw + (player.mixer ? PLAYER_MODEL_YAW_OFFSET : 0);
+}
 function loadPlayerModel() {
   new GLTFLoader().load('./assets/player.glb', (gltf) => {
     const model = gltf.scene;
     model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
     model.position.set(player.x, player.y, player.z);
-    model.rotation.y = player.mesh.rotation.y;
     scene.remove(player.mesh);
     player.mesh = model;
     scene.add(model);
@@ -2312,6 +2319,7 @@ function loadPlayerModel() {
       run: player.mixer.clipAction(clip('Run'))
     };
     player.activeAction = null;
+    setPlayerFacing(player.yaw);
     fadeToPlayerAction(player.actions.idle, 0);
   }, undefined, (err) => console.error('player model failed to load, keeping capsule figure', err));
 }
@@ -5068,7 +5076,7 @@ function updatePlayer(dt) {
     if (player.car.isBike && !player.car.wrecked) {
       // seat the player on the bike, hands on the bars
       player.mesh.position.set(player.car.x, 0.42, player.car.z);
-      player.mesh.rotation.y = -player.car.angle;
+      setPlayerFacing(player.car.angle);
       if (player.mixer) { player.mixer.update(dt); fadeToPlayerAction(player.actions.idle); }
       else {
         const u = player.mesh.userData;
@@ -5121,7 +5129,7 @@ function updatePlayer(dt) {
   const aiming = player.hasPistol && player.weapon === 'pistol';
   if (aiming) player.yaw = camYaw;
   player.mesh.position.set(player.x, player.y, player.z);
-  player.mesh.rotation.y = -player.yaw;
+  setPlayerFacing(player.yaw);
   if (player.mixer) {
     // detailed model: crossfade between its baked Idle/Walk/Run clips instead of the
     // procedural per-limb rig animation (that rig only exists on the capsule NPC figures)
