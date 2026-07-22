@@ -905,7 +905,8 @@ function applySettings() {
 }
 
 // ================= city layout =================
-const B = 60, ROADW = 12, GRID = 8, CITY = B * GRID; // 480m city
+const B = 60, ROADW = 12, GRID = 10, CITY = B * GRID; // 600m city (was 8x8/480m — bigger open world)
+const GRID_OFF = Math.round((GRID - 8) / 2); // shifts the old 8x8 landmark layout so it stays centered on a bigger grid
 const laneCoords = []; for (let i = 0; i <= GRID; i++) laneCoords.push(i * B);
 const drivingLanes = laneCoords.slice(1, GRID); // inner roads for traffic
 function nearestLane(v) {
@@ -948,17 +949,19 @@ function circleHitsSolid(x, z, r, y = 1) {
 
 // block layout data
 const blockInfo = [];
+const GRID_MID = (GRID - 1) / 2;
 for (let gy = 0; gy < GRID; gy++) for (let gx = 0; gx < GRID; gx++) {
   const cx = gx * B + B / 2, cy = gy * B + B / 2;
-  const centerDist = Math.max(Math.abs(gx - 3.5), Math.abs(gy - 3.5));
+  const centerDist = Math.max(Math.abs(gx - GRID_MID), Math.abs(gy - GRID_MID));
   let type;
   // two dead-center blocks are reserved for named landmarks instead of generic towers
-  if (gx === 3 && gy === 3) type = 'landmarkCasino';
-  else if (gx === 4 && gy === 3) type = 'landmarkStadium';
-  else if (gx === 2 && gy === 1) type = 'landmarkHome';
-  else if (gx === 5 && gy === 4) type = 'landmarkSoccer';
-  else if (gx === 2 && gy === 5) type = 'landmarkCinema';
-  else if (gx === 6 && gy === 6) type = 'landmarkGarage2';
+  // (offsets keep the original 8x8 layout centered when the grid is made bigger)
+  if (gx === 3 + GRID_OFF && gy === 3 + GRID_OFF) type = 'landmarkCasino';
+  else if (gx === 4 + GRID_OFF && gy === 3 + GRID_OFF) type = 'landmarkStadium';
+  else if (gx === 2 + GRID_OFF && gy === 1 + GRID_OFF) type = 'landmarkHome';
+  else if (gx === 5 + GRID_OFF && gy === 4 + GRID_OFF) type = 'landmarkSoccer';
+  else if (gx === 2 + GRID_OFF && gy === 5 + GRID_OFF) type = 'landmarkCinema';
+  else if (gx === 6 + GRID_OFF && gy === 6 + GRID_OFF) type = 'landmarkGarage2';
   else if (Math.random() < 0.1) type = 'park';
   else if (centerDist <= 1) type = Math.random() < 0.6 ? 'downtown' : 'houses';
   else if (centerDist >= 3) type = 'houses';
@@ -2264,17 +2267,23 @@ function buildCity() {
 // shared geometries + a color-keyed material cache: with 100+ humans on screen (NPCs, officers,
 // player), giving every single body part its own unique geometry+material was a lot of redundant
 // GPU state for parts that are only ever plain colored boxes.
+// rounded capsule/sphere silhouette instead of flat boxes — reads as a person, not a Lego figure.
+// capsule "len" params below are picked so total rendered height (length + 2*radius) matches the
+// old box heights exactly, so all the pivot/shoe placement math in limb() below still lines up.
 const HUMAN_GEO = {
-  torso: new THREE.BoxGeometry(0.34, 0.6, 0.5), hips: new THREE.BoxGeometry(0.32, 0.2, 0.46),
-  head: new THREE.BoxGeometry(0.3, 0.32, 0.3), hair: new THREE.BoxGeometry(0.32, 0.1, 0.32),
-  nose: new THREE.BoxGeometry(0.08, 0.08, 0.12), arm: new THREE.BoxGeometry(0.13, 0.55, 0.13),
-  leg: new THREE.BoxGeometry(0.16, 0.72, 0.16), gun: new THREE.BoxGeometry(0.34, 0.09, 0.09),
-  shoe: new THREE.BoxGeometry(0.18, 0.1, 0.24)
+  torso: new THREE.CapsuleGeometry(0.185, 0.28, 4, 10), hips: new THREE.CapsuleGeometry(0.17, 0.05, 4, 10),
+  head: new THREE.SphereGeometry(0.175, 16, 12), hair: new THREE.SphereGeometry(0.185, 14, 10, 0, TAU, 0, Math.PI * 0.56),
+  nose: new THREE.ConeGeometry(0.035, 0.09, 6), arm: new THREE.CapsuleGeometry(0.062, 0.43, 4, 8),
+  leg: new THREE.CapsuleGeometry(0.085, 0.55, 4, 8), gun: new THREE.BoxGeometry(0.34, 0.09, 0.09),
+  shoe: new THREE.BoxGeometry(0.18, 0.1, 0.24), hand: new THREE.SphereGeometry(0.068, 8, 8),
+  neck: new THREE.CylinderGeometry(0.075, 0.09, 0.12, 10)
 };
 const humanMatCache = new Map();
 function humanMatFor(hex) {
   let m = humanMatCache.get(hex);
-  if (!m) { m = new THREE.MeshStandardMaterial({ color: hex }); humanMatCache.set(hex, m); }
+  // matte-ish, slightly soft roughness reads as skin/fabric under the sun light instead of the
+  // flat, shadeless plastic look a default (roughness 1, metalness 0) material gives skin tones
+  if (!m) { m = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.78, metalness: 0.04 }); humanMatCache.set(hex, m); }
   return m;
 }
 const SHOE_MAT = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6 });
@@ -2283,22 +2292,24 @@ function makeHuman({ skin = 0xe0ac69, shirt = 0x888888, pants = 0x333344, hair =
   // only the parts that actually read as a human silhouette in the shadow cast a shadow —
   // hair/nose/arms are imperceptible in the shadow map but still cost a full render pass each
   const add = (geo, hex, x, y, z, shadow = true) => { const o = new THREE.Mesh(geo, humanMatFor(hex)); o.position.set(x, y, z); o.castShadow = shadow; g.add(o); return o; };
-  add(HUMAN_GEO.torso, shirt, 0, 1.05, 0);                 // torso
-  add(HUMAN_GEO.hips, pants, 0, 0.72, 0, false);            // hips
-  add(HUMAN_GEO.head, skin, 0, 1.55, 0);                    // head
-  add(HUMAN_GEO.hair, hair, 0, 1.76, 0, false);             // hair
-  add(HUMAN_GEO.nose, skin, 0.17, 1.53, 0, false);          // nose (faces +X)
-  function limb(geo, hex, len, y, z, shadow = true, shoe = false) {
+  add(HUMAN_GEO.torso, shirt, 0, 1.06, 0);                  // torso (capsule — rounded shoulders/waist)
+  add(HUMAN_GEO.hips, pants, 0, 0.74, 0, false);             // hips
+  add(HUMAN_GEO.neck, skin, 0, 1.42, 0, false);              // neck
+  const head = add(HUMAN_GEO.head, skin, 0, 1.58, 0);        // head (sphere)
+  add(HUMAN_GEO.hair, hair, 0, 1.65, 0, false);              // hair cap (top-hemisphere slice of a sphere)
+  const nose = add(HUMAN_GEO.nose, skin, 0.19, 1.57, 0, false); nose.rotation.z = -Math.PI / 2; // nose (faces +X)
+  function limb(geo, hex, len, y, z, shadow = true, endPart = null) {
     const p = new THREE.Group(); p.position.set(0, y, z);
     const m = new THREE.Mesh(geo, humanMatFor(hex));
     m.position.y = -len / 2; m.castShadow = shadow; p.add(m);
-    if (shoe) { const s = new THREE.Mesh(HUMAN_GEO.shoe, SHOE_MAT); s.position.set(0.02, -len, 0.02); p.add(s); }
+    if (endPart === 'shoe') { const s = new THREE.Mesh(HUMAN_GEO.shoe, SHOE_MAT); s.position.set(0.02, -len, 0.02); p.add(s); }
+    else if (endPart === 'hand') { const h = new THREE.Mesh(HUMAN_GEO.hand, humanMatFor(skin)); h.position.set(0, -len - 0.02, 0); p.add(h); }
     g.add(p); return p;
   }
-  const armL = limb(HUMAN_GEO.arm, shirt, 0.55, 1.32, 0.33, false);
-  const armR = limb(HUMAN_GEO.arm, shirt, 0.55, 1.32, -0.33, false);
-  const legL = limb(HUMAN_GEO.leg, pants, 0.72, 0.72, 0.13, true, true);
-  const legR = limb(HUMAN_GEO.leg, pants, 0.72, 0.72, -0.13, true, true);
+  const armL = limb(HUMAN_GEO.arm, shirt, 0.55, 1.32, 0.33, false, 'hand');
+  const armR = limb(HUMAN_GEO.arm, shirt, 0.55, 1.32, -0.33, false, 'hand');
+  const legL = limb(HUMAN_GEO.leg, pants, 0.72, 0.72, 0.13, true, 'shoe');
+  const legR = limb(HUMAN_GEO.leg, pants, 0.72, 0.72, -0.13, true, 'shoe');
   // pistol in right hand (hidden by default)
   const gun = new THREE.Mesh(HUMAN_GEO.gun, humanMatFor(0x111111));
   gun.position.set(0.14, -0.52, 0); gun.visible = false; armR.add(gun);
@@ -3204,24 +3215,29 @@ function solidHitT(ox, oy, oz, dx, dy, dz, maxT) {
 }
 
 // ================= markers, shop, pickups =================
-const GIVER = { x: 90, z: 113 };
-const GARAGE = { x: 330, z: 233 };
+// OFF recenters all the old fixed-coordinate points of interest onto the bigger grid (see GRID_OFF)
+const OFF = GRID_OFF * B;
+const GIVER = { x: 90 + OFF, z: 113 + OFF };
+const GARAGE = { x: 330 + OFF, z: 233 + OFF };
 const STORES = [
-  { name: 'AMMU-OTTO GUNS', x: 210, z: 113, color: 0x7dff9a, css: '#7dff9a', type: 'guns' },
-  { name: 'GUN CLUB DOWNTOWN', x: 270, z: 233, color: 0x7dff9a, css: '#7dff9a', type: 'guns' },
-  { name: 'BURGER SHOT', x: 330, z: 353, color: 0xffa040, css: '#ffa040', type: 'food' },
-  { name: '24/7 MART', x: 90, z: 353, color: 0x40c4ff, css: '#40c4ff', type: 'mart' },
-  { name: 'CLUCKIN\' OTTO', x: 150, z: 233, color: 0xffa040, css: '#ffa040', type: 'food' },
-  { name: 'CENTRAL ARMS', x: 150, z: 170, color: 0x7dff9a, css: '#7dff9a', type: 'guns' },
-  { name: 'MIDTOWN MART', x: 330, z: 170, color: 0x40c4ff, css: '#40c4ff', type: 'mart' },
-  { name: 'PIER SLICE PIZZA', x: 390, z: 270, color: 0xffa040, css: '#ffa040', type: 'food' },
-  { name: 'HARBOR GUNS', x: 390, z: 90, color: 0x7dff9a, css: '#7dff9a', type: 'guns' },
-  { name: 'EASTSIDE MART', x: 90, z: 90, color: 0x40c4ff, css: '#40c4ff', type: 'mart' },
-  { name: 'UPTOWN BURGERS', x: 150, z: 410, color: 0xffa040, css: '#ffa040', type: 'food' },
-  { name: 'SOUTHSIDE MART', x: 390, z: 410, color: 0x40c4ff, css: '#40c4ff', type: 'mart' }
+  { name: 'AMMU-OTTO GUNS', x: 210 + OFF, z: 113 + OFF, color: 0x7dff9a, css: '#7dff9a', type: 'guns' },
+  { name: 'GUN CLUB DOWNTOWN', x: 270 + OFF, z: 233 + OFF, color: 0x7dff9a, css: '#7dff9a', type: 'guns' },
+  { name: 'BURGER SHOT', x: 330 + OFF, z: 353 + OFF, color: 0xffa040, css: '#ffa040', type: 'food' },
+  { name: '24/7 MART', x: 90 + OFF, z: 353 + OFF, color: 0x40c4ff, css: '#40c4ff', type: 'mart' },
+  { name: 'CLUCKIN\' OTTO', x: 150 + OFF, z: 233 + OFF, color: 0xffa040, css: '#ffa040', type: 'food' },
+  { name: 'CENTRAL ARMS', x: 150 + OFF, z: 170 + OFF, color: 0x7dff9a, css: '#7dff9a', type: 'guns' },
+  { name: 'MIDTOWN MART', x: 330 + OFF, z: 170 + OFF, color: 0x40c4ff, css: '#40c4ff', type: 'mart' },
+  { name: 'PIER SLICE PIZZA', x: 390 + OFF, z: 270 + OFF, color: 0xffa040, css: '#ffa040', type: 'food' },
+  { name: 'HARBOR GUNS', x: 390 + OFF, z: 90 + OFF, color: 0x7dff9a, css: '#7dff9a', type: 'guns' },
+  { name: 'EASTSIDE MART', x: 90 + OFF, z: 90 + OFF, color: 0x40c4ff, css: '#40c4ff', type: 'mart' },
+  { name: 'UPTOWN BURGERS', x: 150 + OFF, z: 410 + OFF, color: 0xffa040, css: '#ffa040', type: 'food' },
+  { name: 'SOUTHSIDE MART', x: 390 + OFF, z: 410 + OFF, color: 0x40c4ff, css: '#40c4ff', type: 'mart' },
+  // new outskirts stores, in the district added by the bigger map
+  { name: 'OUTER RIM MART', x: 40, z: 40, color: 0x40c4ff, css: '#40c4ff', type: 'mart' },
+  { name: 'FAR SHORE GUNS', x: CITY - 40, z: CITY - 40, color: 0x7dff9a, css: '#7dff9a', type: 'guns' }
 ];
-const HOSPITAL = { x: 240, z: 227 };
-const SPAWN = { x: 113, z: 108 };
+const HOSPITAL = { x: 240 + OFF, z: 227 + OFF };
+const SPAWN = { x: 113 + OFF, z: 108 + OFF };
 function makeMarker(color, r = 2) {
   const m = new THREE.Mesh(
     new THREE.CylinderGeometry(r, r, 1.4, 24, 1, true),
@@ -5295,7 +5311,8 @@ function boot() {
   homeMarker = makeMarker(0xff3d81, 2); homeMarker.position.set(HOME_DOOR.x, 0.7, HOME_DOOR.z);
   spawnPickups();
   // traffic (roughly 1 in 4 is a motorcycle) — distance culling makes a denser city affordable
-  for (let i = 0; i < 100; i++) {
+  // counts scaled up ~1.5x to match the bigger (600m vs 480m) map so streets don't feel emptier
+  for (let i = 0; i < 145; i++) {
     const horiz = Math.random() < 0.5;
     const lane = drivingLanes[randi(0, drivingLanes.length - 1)];
     const pos = rand(40, CITY - 40);
@@ -5305,7 +5322,7 @@ function boot() {
   }
   // ambient police patrols — always present, even at zero stars, so crimes actually have
   // someone around to witness them (see the note in aiDrive)
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 13; i++) {
     const horiz = Math.random() < 0.5;
     const lane = drivingLanes[randi(0, drivingLanes.length - 1)];
     const pos = rand(40, CITY - 40);
@@ -5314,15 +5331,15 @@ function boot() {
     else makeCar(lane + (Math.random() < 0.5 ? -3 : 3), pos, Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2, opts);
   }
   // parked vehicles along the streets
-  for (let i = 0; i < 46; i++) {
+  for (let i = 0; i < 66; i++) {
     const lane = drivingLanes[randi(0, drivingLanes.length - 1)];
     const pos = rand(30, CITY - 30);
     const opts = { driver: 'none', bike: Math.random() < 0.3 };
     if (Math.random() < 0.5) makeCar(pos, lane - ROADW / 2 + 1.4, 0, opts);
     else makeCar(lane - ROADW / 2 + 1.4, pos, Math.PI / 2, opts);
   }
-  for (let i = 0; i < 190; i++) spawnNpc();
-  for (let g = 0; g < 4; g++) for (let i = 0; i < 5; i++) spawnGangMember(g);
+  for (let i = 0; i < 280; i++) spawnNpc();
+  for (let g = 0; g < 4; g++) for (let i = 0; i < 6; i++) spawnGangMember(g);
   // player
   player.mesh = makeHuman({ shirt: 0xff3d81, pants: 0x2a2a3a, hair: 0x191919 });
   player.mesh.position.set(player.x, 0, player.z);
