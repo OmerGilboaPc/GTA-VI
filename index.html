@@ -889,7 +889,9 @@ scene.add(fill); scene.add(fill.target);
 
 function applySettings() {
   const q = settings.quality;
-  renderer.setPixelRatio(q === 'low' ? 0.7 : q === 'high' ? Math.min(devicePixelRatio, 2) : 1);
+  // capping "high" at 1.5x device pixel ratio instead of 2x — on 4K/retina screens 2x means
+  // rendering (and shading) 4x the pixels of 1x, which is a huge, mostly-imperceptible cost
+  renderer.setPixelRatio(q === 'low' ? 0.7 : q === 'high' ? Math.min(devicePixelRatio, 1.5) : 1);
   sun.shadow.mapSize.set(q === 'high' ? 2048 : 1024, q === 'high' ? 2048 : 1024);
   if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
   renderer.shadowMap.enabled = settings.shadows;
@@ -2336,7 +2338,7 @@ const HUMAN_GEO = {
   head: new THREE.SphereGeometry(0.175, 16, 12), hair: new THREE.SphereGeometry(0.185, 14, 10, 0, TAU, 0, Math.PI * 0.56),
   nose: new THREE.ConeGeometry(0.035, 0.09, 6), arm: new THREE.CapsuleGeometry(0.062, 0.43, 4, 8),
   leg: new THREE.CapsuleGeometry(0.085, 0.55, 4, 8), gun: new THREE.BoxGeometry(0.34, 0.09, 0.09),
-  shoe: new THREE.BoxGeometry(0.18, 0.1, 0.24), hand: new THREE.SphereGeometry(0.068, 8, 8),
+  shoe: new THREE.BoxGeometry(0.18, 0.1, 0.24),
   neck: new THREE.CylinderGeometry(0.075, 0.09, 0.12, 10)
 };
 const humanMatCache = new Map();
@@ -2359,18 +2361,20 @@ function makeHuman({ skin = 0xe0ac69, shirt = 0x888888, pants = 0x333344, hair =
   const head = add(HUMAN_GEO.head, skin, 0, 1.58, 0);        // head (sphere)
   add(HUMAN_GEO.hair, hair, 0, 1.65, 0, false);              // hair cap (top-hemisphere slice of a sphere)
   const nose = add(HUMAN_GEO.nose, skin, 0.19, 1.57, 0, false); nose.rotation.z = -Math.PI / 2; // nose (faces +X)
-  function limb(geo, hex, len, y, z, shadow = true, endPart = null) {
+  function limb(geo, hex, len, y, z, shadow = true, shoe = false) {
     const p = new THREE.Group(); p.position.set(0, y, z);
     const m = new THREE.Mesh(geo, humanMatFor(hex));
     m.position.y = -len / 2; m.castShadow = shadow; p.add(m);
-    if (endPart === 'shoe') { const s = new THREE.Mesh(HUMAN_GEO.shoe, SHOE_MAT); s.position.set(0.02, -len, 0.02); p.add(s); }
-    else if (endPart === 'hand') { const h = new THREE.Mesh(HUMAN_GEO.hand, humanMatFor(skin)); h.position.set(0, -len - 0.02, 0); p.add(h); }
+    if (shoe) { const s = new THREE.Mesh(HUMAN_GEO.shoe, SHOE_MAT); s.position.set(0.02, -len, 0.02); p.add(s); }
     g.add(p); return p;
   }
-  const armL = limb(HUMAN_GEO.arm, shirt, 0.55, 1.32, 0.33, false, 'hand');
-  const armR = limb(HUMAN_GEO.arm, shirt, 0.55, 1.32, -0.33, false, 'hand');
-  const legL = limb(HUMAN_GEO.leg, pants, 0.72, 0.72, 0.13, true, 'shoe');
-  const legR = limb(HUMAN_GEO.leg, pants, 0.72, 0.72, -0.13, true, 'shoe');
+  // no separate hand mesh — the arm capsule's own rounded end cap already reads as a hand/wrist
+  // at normal view distance, so a dedicated sphere there was a free draw call per arm for
+  // basically no visible gain across the 200+ humans on screen
+  const armL = limb(HUMAN_GEO.arm, shirt, 0.55, 1.32, 0.33, false);
+  const armR = limb(HUMAN_GEO.arm, shirt, 0.55, 1.32, -0.33, false);
+  const legL = limb(HUMAN_GEO.leg, pants, 0.72, 0.72, 0.13, true, true);
+  const legR = limb(HUMAN_GEO.leg, pants, 0.72, 0.72, -0.13, true, true);
   // pistol in right hand (hidden by default)
   const gun = new THREE.Mesh(HUMAN_GEO.gun, humanMatFor(0x111111));
   gun.position.set(0.14, -0.52, 0); gun.visible = false; armR.add(gun);
@@ -5387,11 +5391,11 @@ function boot() {
   slotMarker = makeMarker(0xd4af37, 1.6); slotMarker.position.set(slotMachine.x, 0.7, slotMachine.z);
   homeMarker = makeMarker(0xff3d81, 2); homeMarker.position.set(HOME_DOOR.x, 0.7, HOME_DOOR.z);
   spawnPickups();
-  // traffic (roughly 1 in 4 is a motorcycle) — distance culling makes a denser city affordable
-  // counts scaled up modestly to match the bigger (600m vs 480m) map so streets don't feel emptier,
-  // kept well under a full 1.5x multiplier since ambient car/NPC AI updates cost CPU every frame
-  // regardless of whether they're currently rendered
-  for (let i = 0; i < 115; i++) {
+  // traffic (roughly 1 in 4 is a motorcycle) — every car/NPC is a handful of individual draw
+  // calls (no instancing — see the note above updateHouses/towers), and cars in particular are
+  // carjackable at any time (tryEnterCar), which rules out static-batching parked ones the way
+  // trees were batched. Counts here are trimmed a bit further for that reason.
+  for (let i = 0; i < 90; i++) {
     const horiz = Math.random() < 0.5;
     const lane = drivingLanes[randi(0, drivingLanes.length - 1)];
     const pos = rand(40, CITY - 40);
@@ -5401,7 +5405,7 @@ function boot() {
   }
   // ambient police patrols — always present, even at zero stars, so crimes actually have
   // someone around to witness them (see the note in aiDrive)
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 8; i++) {
     const horiz = Math.random() < 0.5;
     const lane = drivingLanes[randi(0, drivingLanes.length - 1)];
     const pos = rand(40, CITY - 40);
@@ -5410,15 +5414,15 @@ function boot() {
     else makeCar(lane + (Math.random() < 0.5 ? -3 : 3), pos, Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2, opts);
   }
   // parked vehicles along the streets
-  for (let i = 0; i < 54; i++) {
+  for (let i = 0; i < 40; i++) {
     const lane = drivingLanes[randi(0, drivingLanes.length - 1)];
     const pos = rand(30, CITY - 30);
     const opts = { driver: 'none', bike: Math.random() < 0.3 };
     if (Math.random() < 0.5) makeCar(pos, lane - ROADW / 2 + 1.4, 0, opts);
     else makeCar(lane - ROADW / 2 + 1.4, pos, Math.PI / 2, opts);
   }
-  for (let i = 0; i < 230; i++) spawnNpc();
-  for (let g = 0; g < 4; g++) for (let i = 0; i < 5; i++) spawnGangMember(g);
+  for (let i = 0; i < 190; i++) spawnNpc();
+  for (let g = 0; g < 4; g++) for (let i = 0; i < 4; i++) spawnGangMember(g);
   // player — start with the cheap capsule figure immediately so boot never blocks on a network
   // fetch, then swap in the detailed rigged model once it's done downloading (~2MB)
   player.mesh = makeHuman({ shirt: 0xff3d81, pants: 0x2a2a3a, hair: 0x191919 });
