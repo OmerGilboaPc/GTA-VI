@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GTO VI — Admin Panel</title>
+<style>
+  :root { --accent:#ff3d81; --cyan:#7fdfff; --green:#9dff70; --red:#ff5252; --panel:rgba(18,20,32,.92); --border:rgba(255,255,255,.12); }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; background:linear-gradient(160deg,#0c0e1a,#161020); color:#eee;
+    font-family:'Segoe UI',Arial,sans-serif; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:16px 26px;
+    background:rgba(10,12,22,.7); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:5; }
+  h1 { margin:0; font-size:22px; letter-spacing:1px;
+    background:linear-gradient(90deg,#ff8ae0,var(--accent),#ffb347); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .who { color:#aaa; font-size:14px; }
+  .wrap { max-width:1150px; margin:0 auto; padding:22px; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:20px 22px; margin-bottom:20px; }
+  .panel h2 { margin:0 0 14px; font-size:16px; letter-spacing:2px; color:var(--cyan); }
+  input,select { background:rgba(255,255,255,.07); border:1px solid var(--border); border-radius:8px;
+    color:#fff; padding:9px 11px; font-size:14px; outline:none; }
+  input:focus,select:focus { border-color:var(--accent); }
+  button { cursor:pointer; border:none; border-radius:8px; font-weight:700; padding:9px 15px; font-size:13px;
+    letter-spacing:.5px; color:#fff; background:rgba(255,255,255,.09); transition:.12s; }
+  button:hover { background:rgba(255,61,129,.25); }
+  button.primary { background:linear-gradient(180deg,var(--accent),#c2185b); }
+  button.green { background:linear-gradient(180deg,#3fbf5f,#2c8f45); }
+  button.red { background:linear-gradient(180deg,#e0483f,#a62c26); }
+  button.small { padding:5px 10px; font-size:12px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; }
+  label.field { display:flex; flex-direction:column; gap:5px; font-size:12px; color:#9aa; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:9px 8px; border-bottom:1px solid rgba(255,255,255,.07); white-space:nowrap; }
+  th { color:#889; font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.5px; }
+  tr:hover td { background:rgba(255,255,255,.03); }
+  .tag { display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:700; }
+  .tag.admin { background:rgba(127,223,255,.16); color:var(--cyan); border:1px solid rgba(127,223,255,.4); }
+  .tag.banned { background:rgba(255,82,82,.16); color:var(--red); border:1px solid rgba(255,82,82,.4); }
+  .money { color:var(--green); font-family:monospace; }
+  .msg { min-height:20px; font-size:13px; margin-top:8px; }
+  .msg.ok { color:var(--green); } .msg.err { color:var(--red); }
+  .center { min-height:100vh; display:flex; align-items:center; justify-content:center; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:32px 34px; width:360px; text-align:center; }
+  .card input { width:100%; margin:7px 0; }
+  .card button { width:100%; margin-top:10px; }
+  .hidden { display:none !important; }
+  .back { color:var(--cyan); text-decoration:none; font-size:13px; }
+  .hint { color:#778; font-size:12px; margin-top:8px; }
+  dialog { background:var(--panel); color:#eee; border:1px solid var(--border); border-radius:14px; padding:22px; width:340px; }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  .googleBtn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; padding:11px;
+    background:#14151c; border:1px solid rgba(255,255,255,.18); border-radius:8px; color:#eee; font-weight:700;
+    font-size:13px; cursor:pointer; margin-top:8px; }
+  .googleBtn:hover { background:#1c1e28; }
+  .divider { display:flex; align-items:center; gap:10px; margin:14px 0; color:#667; font-size:11px; letter-spacing:1px; }
+  .divider::before,.divider::after { content:''; flex:1; height:1px; background:rgba(255,255,255,.12); }
+  .statGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; }
+  .statCard { background:rgba(255,255,255,.05); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+  .statCard .n { font-size:22px; font-weight:800; font-family:monospace; }
+  .statCard .l { font-size:11px; color:#889; text-transform:uppercase; letter-spacing:.5px; margin-top:2px; }
+  .logRow td { font-size:12px; }
+  .actTag { display:inline-block; padding:1px 7px; border-radius:6px; font-size:11px; font-weight:700; background:rgba(127,223,255,.12); color:var(--cyan); }
+  details.rawSave summary { cursor:pointer; color:var(--cyan); font-size:12px; margin-top:10px; }
+  details.rawSave pre { background:#0c0e1a; border:1px solid var(--border); border-radius:8px; padding:10px; font-size:11px; max-height:180px; overflow:auto; }
+  .movieGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:14px; margin-top:14px; }
+  .movieCard { background:rgba(255,255,255,.05); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+  .movieCard .poster { width:100%; height:200px; object-fit:cover; background:#0c0e1a; display:block; }
+  .movieCard .body { padding:10px 12px; }
+  .movieCard .t { font-weight:700; font-size:13px; margin-bottom:4px; }
+  .movieCard .d { font-size:11px; color:#889; max-height:32px; overflow:hidden; margin-bottom:8px; }
+</style>
+</head>
+<body>
+
+<!-- ===== auth gate ===== -->
+<div id="gate" class="center">
+  <div class="card">
+    <h1>GTO VI ADMIN</h1>
+    <p class="hint">Sign in with your Grand Theft Otto account.</p>
+    <input id="gEmail" placeholder="Email" autocomplete="username">
+    <input id="gPass" type="password" placeholder="Password" autocomplete="current-password">
+    <button class="primary" id="gLoginBtn">SIGN IN</button>
+    <div class="divider">OR</div>
+    <button class="googleBtn" id="gGoogleBtn">
+      <svg width="16" height="16" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+      Continue with Google
+    </button>
+    <div class="msg err" id="gMsg"></div>
+    <p style="margin-top:14px"><a class="back" href="/">← Back to game</a></p>
+  </div>
+</div>
+
+<!-- ===== not-an-admin notice ===== -->
+<div id="notAdmin" class="center hidden">
+  <div class="card">
+    <h1>GTO VI ADMIN</h1>
+    <p class="hint">You're signed in as <b id="notAdminEmail"></b>, but this account isn't an admin.
+    Ask an existing admin to promote you from the Players list, or sign in with the account
+    that owns this Firebase project.</p>
+    <button id="notAdminLogout" style="width:100%;margin-top:10px">Sign out</button>
+    <p style="margin-top:14px"><a class="back" href="/">← Back to game</a></p>
+  </div>
+</div>
+
+<!-- ===== admin app ===== -->
+<div id="app" class="hidden">
+  <header>
+    <h1>GTO VI — ADMIN PANEL</h1>
+    <div class="row">
+      <span class="who" id="who"></span>
+      <a class="back" href="/">▶ Play game</a>
+      <button class="small" id="logoutBtn">Sign out</button>
+    </div>
+  </header>
+  <div class="wrap">
+
+    <div class="panel">
+      <h2>OVERVIEW</h2>
+      <div class="statGrid" id="statGrid"></div>
+    </div>
+
+    <div class="panel">
+      <h2>GLOBAL GAME CONTROLS</h2>
+      <div class="grid">
+        <label class="field">Broadcast announcement (shown to all players)
+          <input id="cAnnounce" placeholder="e.g. Double cash weekend!">
+        </label>
+        <label class="field">Economy multiplier (payouts ×)
+          <input id="cEcon" type="number" step="0.5" min="0" max="100">
+        </label>
+        <label class="field">Starting money (new accounts)
+          <input id="cStart" type="number" min="0">
+        </label>
+        <label class="field">Maintenance mode
+          <select id="cMaint"><option value="false">Off — everyone can play</option><option value="true">On — admins only</option></select>
+        </label>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="primary" id="saveConfigBtn">SAVE GLOBAL SETTINGS</button>
+        <button id="clearAnnounceBtn">Clear announcement</button>
+        <div style="flex:1"></div>
+        <input id="giveAllAmt" type="number" placeholder="amount" style="width:120px" value="1000">
+        <button class="green" id="giveAllBtn">💰 GIVE TO ALL PLAYERS</button>
+      </div>
+      <div class="msg" id="cMsg"></div>
+    </div>
+
+    <div class="panel">
+      <h2>PLAYERS <span id="userCount" style="color:#667;font-size:13px"></span></h2>
+      <div class="row" style="margin-bottom:12px">
+        <input id="search" placeholder="🔍 search username or email…" style="flex:1;min-width:200px">
+        <button id="refreshBtn">↻ Refresh</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Player</th><th>Email</th><th>Money</th><th>Missions</th><th>Status</th><th>Last active</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="userRows"></tbody>
+        </table>
+      </div>
+      <div class="msg" id="uMsg"></div>
+    </div>
+
+    <div class="panel">
+      <h2>CINEMA — MOVIE CATALOG</h2>
+      <div class="grid">
+        <label class="field">Title <input id="mTitle" placeholder="e.g. Vice Nights"></label>
+        <label class="field">Description <input id="mDesc" placeholder="One-line synopsis"></label>
+        <label class="field">Poster image URL <input id="mPoster" placeholder="https://..."></label>
+        <label class="field">Video URL (Cloudflare link) <input id="mVideo" placeholder="https://..."></label>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="primary" id="addMovieBtn">+ ADD MOVIE</button>
+      </div>
+      <div class="msg" id="mMsg"></div>
+      <div class="movieGrid" id="movieGrid"></div>
+    </div>
+
+    <div class="panel">
+      <h2>ACTIVITY LOG <span style="color:#667;font-size:13px">(latest 50 admin actions)</span></h2>
+      <div class="row" style="margin-bottom:12px"><button id="refreshLogBtn">↻ Refresh</button></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+          <tbody id="logRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== edit dialog ===== -->
+<dialog id="editDlg" style="width:460px">
+  <h2 style="margin:0 0 12px;color:var(--cyan);letter-spacing:1px" id="editTitle">Edit player</h2>
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+    <label class="field">Money <input id="eMoney" type="number"></label>
+    <label class="field">Missions done <input id="eMissions" type="number"></label>
+    <label class="field">Health <input id="eHealth" type="number"></label>
+    <label class="field">Armor <input id="eArmor" type="number"></label>
+    <label class="field">Ammo <input id="eAmmo" type="number"></label>
+    <label class="field">Pistol <select id="ePistol"><option value="false">No</option><option value="true">Yes</option></select></label>
+    <label class="field">SMG <select id="eSmg"><option value="false">No</option><option value="true">Yes</option></select></label>
+    <label class="field">Position X <input id="eX" type="number" step="0.1"></label>
+    <label class="field">Position Z <input id="eZ" type="number" step="0.1"></label>
+    <label class="field">Garage capacity <input id="eGarageCap" type="number" min="1" max="6"></label>
+    <label class="field">House paint tier <input id="ePaintTier" type="number" min="0" max="4"></label>
+    <label class="field">Mattress <select id="eMattress"><option value="false">No</option><option value="true">Yes</option></select></label>
+    <label class="field">Stocked fridge <select id="eFridge"><option value="false">No</option><option value="true">Yes</option></select></label>
+    <label class="field">Home safe <select id="eSafe"><option value="false">No</option><option value="true">Yes</option></select></label>
+    <label class="field">Pool lights <select id="ePoolLights"><option value="false">No</option><option value="true">Yes</option></select></label>
+  </div>
+  <div id="eGarageInfo" style="margin-top:10px;font-size:12px;color:#889"></div>
+  <details class="rawSave"><summary>Raw save JSON</summary><pre id="eRawJson"></pre></details>
+  <div class="row" style="margin-top:16px">
+    <button class="primary" id="eSaveBtn">SAVE CHANGES</button>
+    <button class="red" id="eClearGarageBtn">Clear garage</button>
+    <button id="eCancelBtn">Cancel</button>
+  </div>
+  <div class="msg" id="eMsg"></div>
+</dialog>
+
+<script type="importmap">
+{ "imports": {
+  "firebase/app": "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js",
+  "firebase/auth": "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js",
+  "firebase/firestore": "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js"
+} }
+</script>
+<script type="module">
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signInWithPopup,
+  GoogleAuthProvider, signOut
+} from 'firebase/auth';
+import {
+  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, increment,
+  addDoc, query, orderBy, limit, serverTimestamp
+} from 'firebase/firestore';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDvGREjYP4huORIJJI4dlFHtyRrPgRe6LE",
+  authDomain: "gta-6-3d62f.firebaseapp.com",
+  projectId: "gta-6-3d62f",
+  storageBucket: "gta-6-3d62f.firebasestorage.app",
+  messagingSenderId: "407710739892",
+  appId: "1:407710739892:web:f7c9d1a007cc1f4b6496e1"
+};
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+
+const $ = id => document.getElementById(id);
+let users = [], config = {};
+
+// ---------- activity log ----------
+async function logActivity(action, target, details) {
+  try {
+    await addDoc(collection(db, 'activityLog'), {
+      ts: serverTimestamp(), admin: auth.currentUser?.email || '(unknown)', action, target: target || '—', details: details || ''
+    });
+  } catch (e) { /* logging is best-effort — never block the real action on it */ }
+  loadLog();
+}
+async function loadLog() {
+  try {
+    const q = query(collection(db, 'activityLog'), orderBy('ts', 'desc'), limit(50));
+    const snap = await getDocs(q);
+    const rows = snap.docs.map(d => {
+      const l = d.data();
+      return `<tr class="logRow">
+        <td style="color:#889">${fmtTime(l.ts)}</td>
+        <td>${esc(l.admin || '—')}</td>
+        <td><span class="actTag">${esc(l.action || '—')}</span></td>
+        <td>${esc(l.target || '—')}</td>
+        <td style="color:#aab;white-space:normal">${esc(l.details || '')}</td>
+      </tr>`;
+    }).join('');
+    $('logRows').innerHTML = rows || '<tr><td colspan="5" style="color:#667">No activity yet</td></tr>';
+  } catch (e) {
+    $('logRows').innerHTML = `<tr><td colspan="5" style="color:#667">Log unavailable — ${esc(friendlyErr(e))}</td></tr>`;
+  }
+}
+$('refreshLogBtn').onclick = loadLog;
+
+// ---------- cinema movie catalog ----------
+let movies = [];
+async function loadMovies() {
+  try {
+    const snap = await getDocs(collection(db, 'movies'));
+    movies = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) { movies = []; }
+  renderMovies();
+}
+function renderMovies() {
+  $('movieGrid').innerHTML = movies.map(m => `
+    <div class="movieCard">
+      <img class="poster" src="${esc(m.posterUrl)}" onerror="this.style.display='none'">
+      <div class="body">
+        <div class="t">${esc(m.title)}</div>
+        <div class="d">${esc(m.description)}</div>
+        <button class="small red" data-id="${esc(m.id)}">Delete</button>
+      </div>
+    </div>`).join('') || '<div style="color:#667">No movies added yet</div>';
+  $('movieGrid').querySelectorAll('button[data-id]').forEach(b => {
+    b.onclick = async () => {
+      const m = movies.find(x => x.id === b.dataset.id);
+      if (!confirm(`Delete "${m.title}"?`)) return;
+      await deleteDoc(doc(db, 'movies', m.id));
+      logActivity('movie.delete', m.title);
+      loadMovies();
+    };
+  });
+}
+$('addMovieBtn').onclick = async () => {
+  const m = $('mMsg');
+  const title = $('mTitle').value.trim(), description = $('mDesc').value.trim(),
+    posterUrl = $('mPoster').value.trim(), videoUrl = $('mVideo').value.trim();
+  if (!title || !videoUrl) { m.className = 'msg err'; m.textContent = 'Title and video URL are required'; return; }
+  try {
+    await addDoc(collection(db, 'movies'), { title, description, posterUrl, videoUrl, createdAt: serverTimestamp() });
+    m.className = 'msg ok'; m.textContent = `✔ "${title}" added to the catalog`;
+    logActivity('movie.add', title);
+    $('mTitle').value = ''; $('mDesc').value = ''; $('mPoster').value = ''; $('mVideo').value = '';
+    loadMovies();
+  } catch (e) { m.className = 'msg err'; m.textContent = friendlyErr(e); }
+};
+
+// ---------- overview stats ----------
+function renderStats() {
+  const totalMoney = users.reduce((sum, u) => sum + ((u.save && u.save.money) || 0), 0);
+  const totalMissions = users.reduce((sum, u) => sum + ((u.save && u.save.missionsDone) || 0), 0);
+  const banned = users.filter(u => u.banned).length;
+  const admins = users.filter(u => u.isAdmin).length;
+  const cards = [
+    ['Total players', users.length],
+    ['Total cash in economy', '$' + totalMoney.toLocaleString()],
+    ['Missions completed', totalMissions.toLocaleString()],
+    ['Banned accounts', banned],
+    ['Admins', admins],
+    ['Maintenance mode', config.maintenance ? 'ON' : 'off']
+  ];
+  $('statGrid').innerHTML = cards.map(([l, n]) =>
+    `<div class="statCard"><div class="n">${n}</div><div class="l">${esc(l)}</div></div>`).join('');
+}
+
+function showGate() { $('app').classList.add('hidden'); $('notAdmin').classList.add('hidden'); $('gate').classList.remove('hidden'); }
+function showNotAdmin(email) { $('gate').classList.add('hidden'); $('app').classList.add('hidden'); $('notAdmin').classList.remove('hidden'); $('notAdminEmail').textContent = email; }
+function showApp() { $('gate').classList.add('hidden'); $('notAdmin').classList.add('hidden'); $('app').classList.remove('hidden'); }
+
+function friendlyErr(e) {
+  const map = {
+    'auth/invalid-credential': 'Wrong email or password', 'auth/user-not-found': 'Wrong email or password',
+    'auth/wrong-password': 'Wrong email or password', 'auth/invalid-email': 'That email looks invalid',
+    'auth/popup-closed-by-user': 'Sign-in was cancelled'
+  };
+  return map[e && e.code] || (e && e.message) || 'Something went wrong';
+}
+
+$('gLoginBtn').onclick = async () => {
+  $('gMsg').textContent = '';
+  try { await signInWithEmailAndPassword(auth, $('gEmail').value.trim(), $('gPass').value); }
+  catch (e) { $('gMsg').textContent = friendlyErr(e); }
+};
+$('gGoogleBtn').onclick = async () => {
+  $('gMsg').textContent = '';
+  try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+  catch (e) { $('gMsg').textContent = friendlyErr(e); }
+};
+$('gPass').addEventListener('keydown', e => { if (e.key === 'Enter') $('gLoginBtn').click(); });
+$('logoutBtn').onclick = $('notAdminLogout').onclick = () => signOut(auth);
+
+// ---------- boot: react to auth state ----------
+onAuthStateChanged(auth, async user => {
+  if (!user) return showGate();
+  try {
+    const snap = await getDoc(doc(db, 'users', user.uid));
+    const profile = snap.exists() ? snap.data() : null;
+    // isAdmin may be granted purely by the bootstrap email (Firestore rules check this too),
+    // so try loading the user list — if rules deny it, this account truly isn't an admin.
+    const usersSnap = await getDocs(collection(db, 'users')).catch(() => null);
+    if (!usersSnap) return showNotAdmin(user.email || '(no email)');
+    users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    const cfgSnap = await getDoc(doc(db, 'config', 'game'));
+    config = cfgSnap.exists() ? cfgSnap.data() : {};
+    $('who').textContent = 'signed in as ' + (profile ? profile.username : user.email);
+    fillConfig();
+    renderUsers();
+    renderStats();
+    loadLog();
+    loadMovies();
+    showApp();
+  } catch (e) {
+    showNotAdmin(user.email || '(no email)');
+  }
+});
+
+function fillConfig() {
+  $('cAnnounce').value = config.announcement || '';
+  $('cEcon').value = config.economyMultiplier ?? 1;
+  $('cStart').value = config.startingMoney ?? 150;
+  $('cMaint').value = String(!!config.maintenance);
+}
+
+// ---------- global config ----------
+$('saveConfigBtn').onclick = async () => {
+  const m = $('cMsg');
+  const patch = {
+    announcement: $('cAnnounce').value.slice(0, 200),
+    economyMultiplier: parseFloat($('cEcon').value) || 0,
+    startingMoney: parseInt($('cStart').value, 10) || 0,
+    maintenance: $('cMaint').value === 'true'
+  };
+  try {
+    await setDoc(doc(db, 'config', 'game'), patch, { merge: true });
+    config = { ...config, ...patch };
+    m.className = 'msg ok'; m.textContent = '✔ Global settings saved';
+    renderStats();
+    logActivity('config.save', 'global', JSON.stringify(patch));
+  } catch (e) { m.className = 'msg err'; m.textContent = friendlyErr(e); }
+};
+$('clearAnnounceBtn').onclick = () => { $('cAnnounce').value = ''; $('saveConfigBtn').click(); };
+$('giveAllBtn').onclick = async () => {
+  const amt = parseInt($('giveAllAmt').value, 10) || 0;
+  if (!confirm(`Give $${amt} to every player?`)) return;
+  const m = $('cMsg');
+  try {
+    let n = 0;
+    for (const u of users) {
+      await updateDoc(doc(db, 'users', u.uid), { 'save.money': increment(amt) }).catch(async () => {
+        // no save yet (brand new account) — create a minimal one instead of failing
+        await setDoc(doc(db, 'users', u.uid), { save: { money: amt } }, { merge: true });
+      });
+      n++;
+    }
+    m.className = 'msg ok'; m.textContent = `✔ Gave $${amt} to ${n} players`;
+    loadUsers();
+    logActivity('money.giveAll', 'all players', `+$${amt} to ${n} accounts`);
+  } catch (e) { m.className = 'msg err'; m.textContent = friendlyErr(e); }
+};
+
+// ---------- users ----------
+async function loadUsers() {
+  const snap = await getDocs(collection(db, 'users'));
+  users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+  renderUsers();
+  renderStats();
+}
+$('refreshBtn').onclick = loadUsers;
+$('search').oninput = renderUsers;
+function fmtTime(t) {
+  if (!t) return '—';
+  const ms = t.toMillis ? t.toMillis() : t;
+  const s = (Date.now() - ms) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+function renderUsers() {
+  const q = $('search').value.trim().toLowerCase();
+  const list = users.filter(u =>
+    (u.username || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q));
+  $('userCount').textContent = `(${users.length})`;
+  const rows = list.map(u => {
+    const s = u.save || {};
+    const tags = [
+      u.isAdmin ? '<span class="tag admin">admin</span>' : '',
+      u.banned ? '<span class="tag banned">banned</span>' : ''
+    ].join(' ');
+    return `<tr>
+      <td><b>${esc(u.username || '(no name)')}</b></td>
+      <td style="color:#889">${esc(u.email || '—')}</td>
+      <td class="money">$${(s.money || 0).toLocaleString()}</td>
+      <td>${s.missionsDone || 0}</td>
+      <td>${tags || '<span style="color:#667">—</span>'}</td>
+      <td style="color:#889">${fmtTime(u.savedAt || u.createdAt)}</td>
+      <td>
+        <button class="small" data-act="edit" data-u="${esc(u.uid)}">✎ Edit</button>
+        <button class="small" data-act="admin" data-u="${esc(u.uid)}">${u.isAdmin ? 'Revoke admin' : 'Make admin'}</button>
+        <button class="small ${u.banned ? 'green' : 'red'}" data-act="ban" data-u="${esc(u.uid)}">${u.banned ? 'Unban' : 'Ban'}</button>
+        <button class="small" data-act="reset" data-u="${esc(u.uid)}">Reset</button>
+        <button class="small red" data-act="del" data-u="${esc(u.uid)}">Delete</button>
+      </td></tr>`;
+  }).join('');
+  $('userRows').innerHTML = rows || '<tr><td colspan="7" style="color:#667">No players found</td></tr>';
+  document.querySelectorAll('#userRows button').forEach(b => b.onclick = () => userAction(b.dataset.act, b.dataset.u));
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+async function userAction(act, uid) {
+  const u = users.find(x => x.uid === uid);
+  const m = $('uMsg');
+  try {
+    if (act === 'edit') return openEdit(uid);
+    if (act === 'admin') {
+      await updateDoc(doc(db, 'users', uid), { isAdmin: !u.isAdmin });
+      logActivity(u.isAdmin ? 'admin.revoke' : 'admin.grant', u.username || uid);
+      return loadUsers();
+    }
+    if (act === 'ban') {
+      if (!u.banned && !confirm(`Ban ${u.username}? They will be blocked from playing immediately.`)) return;
+      await updateDoc(doc(db, 'users', uid), { banned: !u.banned });
+      logActivity(u.banned ? 'player.unban' : 'player.ban', u.username || uid);
+      return loadUsers();
+    }
+    if (act === 'reset') { if (confirm(`Wipe ${u.username}'s save (money, progress, gear)?`)) { await updateDoc(doc(db, 'users', uid), { save: null }); logActivity('player.reset', u.username || uid); loadUsers(); } }
+    if (act === 'del') {
+      if (confirm(`Delete ${u.username}'s profile & save data? (Their login itself must be removed separately in the Firebase Console → Authentication tab if you want it fully gone.)`)) {
+        await deleteDoc(doc(db, 'users', uid));
+        logActivity('player.delete', u.username || uid);
+        loadUsers();
+      }
+    }
+  } catch (e) { m.className = 'msg err'; m.textContent = friendlyErr(e); }
+}
+
+// ---------- edit dialog ----------
+const dlg = $('editDlg');
+let editing = null;
+function openEdit(uid) {
+  editing = uid;
+  $('eMsg').textContent = '';
+  const u = users.find(x => x.uid === uid);
+  const s = (u && u.save) || {};
+  const h = s.home || {};
+  $('editTitle').textContent = 'Edit — ' + (u ? u.username : uid);
+  $('eMoney').value = s.money ?? 0;
+  $('eMissions').value = s.missionsDone ?? 0;
+  $('eHealth').value = s.health ?? 100;
+  $('eArmor').value = s.armor ?? 0;
+  $('eAmmo').value = s.ammo ?? 0;
+  $('ePistol').value = String(!!s.hasPistol);
+  $('eSmg').value = String(!!s.hasSmg);
+  $('eX').value = s.x ?? 0;
+  $('eZ').value = s.z ?? 0;
+  $('eGarageCap').value = h.garageCap ?? 2;
+  $('ePaintTier').value = h.paintTier ?? 0;
+  $('eMattress').value = String(!!h.mattress);
+  $('eFridge').value = String(!!h.fridge);
+  $('eSafe').value = String(!!h.safe);
+  $('ePoolLights').value = String(!!h.poolLights);
+  const garage = s.garage || [];
+  $('eGarageInfo').textContent = garage.length
+    ? `🚗 ${garage.length} vehicle(s) parked: ${garage.map(c => (c.isBike ? 'bike' : c.sports ? 'sports car' : 'car')).join(', ')}`
+    : '🚗 Garage is empty';
+  $('eRawJson').textContent = JSON.stringify(s, null, 2);
+  dlg.showModal();
+}
+$('eCancelBtn').onclick = () => dlg.close();
+$('eSaveBtn').onclick = async () => {
+  const patch = {
+    'save.money': parseInt($('eMoney').value, 10) || 0,
+    'save.missionsDone': parseInt($('eMissions').value, 10) || 0,
+    'save.health': parseInt($('eHealth').value, 10) || 0,
+    'save.armor': parseInt($('eArmor').value, 10) || 0,
+    'save.ammo': parseInt($('eAmmo').value, 10) || 0,
+    'save.hasPistol': $('ePistol').value === 'true',
+    'save.hasSmg': $('eSmg').value === 'true',
+    'save.x': parseFloat($('eX').value) || 0,
+    'save.z': parseFloat($('eZ').value) || 0,
+    'save.home.garageCap': parseInt($('eGarageCap').value, 10) || 2,
+    'save.home.paintTier': parseInt($('ePaintTier').value, 10) || 0,
+    'save.home.mattress': $('eMattress').value === 'true',
+    'save.home.fridge': $('eFridge').value === 'true',
+    'save.home.safe': $('eSafe').value === 'true',
+    'save.home.poolLights': $('ePoolLights').value === 'true'
+  };
+  try {
+    await updateDoc(doc(db, 'users', editing), patch);
+    const u = users.find(x => x.uid === editing);
+    logActivity('player.edit', (u && u.username) || editing, JSON.stringify(patch));
+    dlg.close(); loadUsers();
+  } catch (e) { $('eMsg').className = 'msg err'; $('eMsg').textContent = friendlyErr(e); }
+};
+$('eClearGarageBtn').onclick = async () => {
+  if (!confirm('Clear this player\'s garage? Any parked vehicles will be gone on next load.')) return;
+  try {
+    await updateDoc(doc(db, 'users', editing), { 'save.garage': [] });
+    const u = users.find(x => x.uid === editing);
+    logActivity('player.clearGarage', (u && u.username) || editing);
+    dlg.close(); loadUsers();
+  } catch (e) { $('eMsg').className = 'msg err'; $('eMsg').textContent = friendlyErr(e); }
+};
+</script>
+</body>
+</html>
